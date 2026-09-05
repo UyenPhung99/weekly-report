@@ -50,11 +50,12 @@ export function SettingsView() {
   } = useWeeklyReport();
   const { toast } = useToast();
 
-  const handleDelete = (
-    result: MutationResult,
+  const handleDelete = async (
+    resultPromise: Promise<MutationResult>,
     successTitle: string,
     successDescription: string,
   ) => {
+    const result = await resultPromise;
     if (result.ok) {
       toast({
         title: successTitle,

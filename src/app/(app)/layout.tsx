@@ -7,9 +7,11 @@ import { WeeklyReportProvider } from "@/lib/store";
 export default function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // ToastProvider bọc ngoài WeeklyReportProvider vì store cần useToast() để
+  // báo lỗi khi một thao tác lưu xuống database thất bại (xem lib/store.tsx).
   return (
-    <WeeklyReportProvider>
-      <ToastProvider>
+    <ToastProvider>
+      <WeeklyReportProvider>
         <div className="min-h-screen bg-background">
           <AppSidebar />
 
@@ -28,7 +30,7 @@ export default function AppLayout({
             </footer>
           </div>
         </div>
-      </ToastProvider>
-    </WeeklyReportProvider>
+      </WeeklyReportProvider>
+    </ToastProvider>
   );
 }

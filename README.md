@@ -1,16 +1,22 @@
 # Weekly Report
 
-Ứng dụng web tổng hợp báo cáo tuần — Next.js 14 (App Router) + TypeScript + Tailwind CSS + shadcn/ui.
-Hiện chạy trên **mock data trong bộ nhớ**, cấu trúc sẵn sàng để thay bằng API/database thật.
+Ứng dụng web tổng hợp báo cáo tuần — Next.js 14 (App Router) + TypeScript +
+Tailwind CSS + shadcn/ui + Prisma/Postgres. Dữ liệu lưu thật trong database,
+không mất khi restart server.
 
 ## Yêu cầu
 
 - Node.js **18.18 trở lên** (đang dùng Node 24 LTS) — cài tại https://nodejs.org
+- Một database Postgres (xem mục *Cơ sở dữ liệu* bên dưới để lấy miễn phí qua
+  Vercel Postgres, hoặc dùng SQLite tạm thời để chạy thử không cần tài khoản)
 
 ## Chạy dự án
 
 ```bash
+cp .env.example .env   # rồi sửa DATABASE_URL — xem mục "Cơ sở dữ liệu"
 npm install
+npm run db:push
+npm run db:seed
 npm run dev
 ```
 
@@ -19,11 +25,20 @@ Mở http://localhost:3000 (tự chuyển hướng sang `/dashboard`).
 ## Cấu trúc
 
 ```
+prisma/
+  schema.prisma            # Department / Person / Meeting / Task — provider "postgresql"
+  seed.ts                  # Nạp dữ liệu mẫu vào database (npm run db:seed)
 src/
   app/
     layout.tsx              # Root layout, font Inter (hỗ trợ tiếng Việt)
     globals.css             # Design tokens dạng CSS variables
     page.tsx                # Redirect -> /dashboard
+    api/                    # Route handler — validate input, gọi Prisma, trả JSON
+      bootstrap/route.ts    # GET toàn bộ dữ liệu (thay cho getInitialData() cũ)
+      departments/          # POST + [id]/route.ts (PATCH, DELETE)
+      people/                # POST + [id]/route.ts (PATCH, DELETE)
+      meetings/              # POST + [id]/route.ts (PATCH, DELETE)
+      tasks/                 # POST + [id]/route.ts (PATCH, DELETE)
     (app)/
       layout.tsx            # Layout chung: sidebar + header + store + toast
       dashboard/            # page.tsx + loading.tsx
@@ -42,14 +57,18 @@ src/
     shared/                 # PersonCell, badge trạng thái / ưu tiên, skeleton từng trang
     layout/                 # Brand, sidebar, header, page header, placeholder
     ui/                     # Component shadcn/ui
-  data/                     # MOCK DATA — điểm thay thế khi có API thật
+  data/                     # Dữ liệu mẫu — chỉ còn dùng để SEED database, không dùng lúc runtime
     departments.ts
     people.ts
     meetings.ts
     tasks.ts
-    index.ts                # getInitialData()
+    index.ts                # Barrel export cho prisma/seed.ts
   lib/
-    store.tsx               # WeeklyReportProvider + useWeeklyReport() (CRUD trong bộ nhớ)
+    store.tsx               # WeeklyReportProvider + useWeeklyReport() — state cục bộ, đồng bộ qua API
+    api-client.ts           # Hàm gọi các route /api/* (điểm duy nhất biết URL endpoint)
+    db.ts                   # Prisma Client singleton
+    db-mappers.ts           # Chuyển đổi row Prisma <-> type dùng trong app
+    api-helpers.ts          # Validate input, chuẩn hoá response lỗi cho route handler
     chart.ts                # Màu biểu đồ, ánh xạ từ CSS variable
     report.ts               # Tổng hợp báo cáo tuần + xuất bản text
     report-delivery.ts      # Điểm gắn API gửi email/Slack (CHƯA triển khai)
@@ -80,19 +99,88 @@ ISO `"yyyy-MM-dd"` cho dễ ánh xạ sang API/DB.
 > tự chuyển công việc quá hạn mà chưa hoàn thành thành `Trễ hạn`, nên không cần
 > cập nhật thủ công trong dữ liệu.
 
-## Thay mock data bằng API thật
+## Cơ sở dữ liệu
 
-Toàn bộ dữ liệu đi qua một điểm duy nhất:
+App đọc/ghi dữ liệu **thật** qua Postgres, không còn giữ trong bộ nhớ nữa.
+Kiến trúc:
 
-1. `src/data/index.ts` → `getInitialData()` trả về dữ liệu khởi tạo.
-   Thay bằng lời gọi API (`fetch`, server action, hoặc React Query).
-2. `src/lib/store.tsx` → `createMeeting` / `updateMeeting` / `deleteMeeting` /
-   `createTask` / `updateTask` / `deleteTask` hiện thao tác trên state trong bộ nhớ.
-   Thay thân hàm bằng lời gọi API tương ứng; toàn bộ component dùng
-   `useWeeklyReport()` nên không phải sửa gì thêm.
+```
+Component (dialog, bảng, dashboard…)
+        │  useWeeklyReport()
+        ▼
+src/lib/store.tsx        — state cục bộ (cập nhật ngay để UI phản hồi tức thì)
+        │  fetch qua src/lib/api-client.ts
+        ▼
+src/app/api/*/route.ts   — validate input, gọi Prisma
+        │
+        ▼
+Prisma Client (src/lib/db.ts) ──► Postgres
+```
 
-Dữ liệu mẫu hiện có: **4 bộ phận · 10 nhân sự · 7 cuộc họp · 20 công việc**, với
-hạn chót neo theo ngày hiện tại nên luôn có đủ nhóm trễ hạn / sắp đến hạn / còn hạn.
+- **Optimistic update**: mọi thao tác tạo/sửa/xoá cập nhật giao diện ngay lập
+  tức, đồng thời gửi request lên server ở nền. Nếu server từ chối, store tự
+  tải lại toàn bộ dữ liệu và báo lỗi qua toast — không cần refresh trang thủ công.
+- **Xoá bộ phận/nhân sự** là ngoại lệ: chờ server xác nhận (server mới biết
+  chắc còn dữ liệu liên quan hay không) rồi mới cập nhật giao diện — giữ đúng
+  hành vi "chặn xoá kèm lý do" đã có từ trước.
+- Schema khai báo trong [`prisma/schema.prisma`](prisma/schema.prisma). Ngày
+  tháng và danh sách quyết định của cuộc họp lưu dạng `String` (không dùng kiểu
+  riêng của Postgres) để logic ứng dụng không phụ thuộc engine cụ thể.
+
+### Chạy cục bộ
+
+```bash
+cp .env.example .env
+# Sửa DATABASE_URL trong .env trỏ tới Postgres của bạn
+npm install          # tự chạy "prisma generate"
+npm run db:push       # đồng bộ schema xuống database (tạo bảng)
+npm run db:seed       # nạp dữ liệu mẫu — 4 bộ phận · 10 nhân sự · 7 cuộc họp · 20 công việc
+npm run dev
+```
+
+Không có Postgres sẵn để test cục bộ? Cách nhanh nhất: đổi tạm
+`provider = "postgresql"` thành `"sqlite"` trong `schema.prisma` và
+`DATABASE_URL="file:./dev.db"` trong `.env` — chạy được ngay, không cần cài gì
+thêm (đây cũng chính là cách đã dùng để kiểm thử toàn bộ luồng tạo/sửa/xoá và
+xác nhận dữ liệu **sống sót qua việc khởi động lại server** trước khi bàn giao
+bản này). Nhớ đổi lại `"postgresql"` trước khi deploy.
+
+### Deploy lên Vercel — các bước cần bạn tự làm
+
+Đây là phần duy nhất không thể tự động hoá: tạo tài khoản và cơ sở dữ liệu là
+thao tác gắn với tài khoản cá nhân của bạn.
+
+1. **Tạo tài khoản Vercel** (miễn phí) tại https://vercel.com/signup — đăng
+   nhập bằng GitHub là nhanh nhất.
+2. **Đưa code lên GitHub**: tạo repo mới, `git remote add origin <url>`,
+   `git push -u origin main` (repo cục bộ đã có sẵn commit, xem `git log`).
+3. Trên Vercel: **Add New → Project**, chọn repo vừa đẩy lên, bấm **Deploy**
+   (không cần đổi cấu hình build, Next.js được Vercel nhận diện tự động).
+4. **Tạo database**: vào project vừa tạo → tab **Storage → Create Database →
+   Postgres** (Neon). Vài cú click, không cần thẻ tín dụng cho gói miễn phí.
+   Vercel tự thêm biến môi trường `DATABASE_URL` (và vài biến liên quan) vào
+   project — không cần copy tay.
+5. **Đồng bộ schema + nạp dữ liệu mẫu vào database thật**: kéo connection
+   string về máy (Storage tab → `.env.local` → copy), rồi chạy cục bộ:
+   ```bash
+   DATABASE_URL="<connection string vừa copy>" npm run db:push
+   DATABASE_URL="<connection string vừa copy>" npm run db:seed
+   ```
+   (Hoặc dùng `vercel env pull .env` nếu đã cài Vercel CLI — lệnh này tự ghi
+   đúng connection string vào `.env`.)
+6. Vào tab **Deployments**, bấm **Redeploy** ở bản mới nhất để app nhận biến
+   môi trường vừa thêm.
+
+Xong bước 6, link dạng `https://<tên-project>.vercel.app` chạy 24/7, ai có link
+đều truy cập được — không cần đăng nhập (app hiện chưa có xác thực, đúng như
+yêu cầu). Muốn đổi tên miền, vào **Settings → Domains**.
+
+### Chuyển sang lưu trữ khác (không dùng Vercel)
+
+Vì mọi thứ đi qua `DATABASE_URL` chuẩn Postgres, có thể thay Vercel Postgres
+bằng bất kỳ Postgres nào khác (Supabase, Neon trực tiếp, Railway…) mà không
+đổi code — chỉ cần connection string đúng định dạng
+`postgresql://user:password@host:5432/db?sslmode=require`.
 
 ## Tính năng
 

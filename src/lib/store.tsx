@@ -1,8 +1,12 @@
 "use client";
 
 import * as React from "react";
+import { RotateCw, ServerCrash } from "lucide-react";
 
-import { getInitialData } from "@/data";
+import { useToast } from "@/components/ui/toast";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api, apiErrorMessage } from "@/lib/api-client";
 import { today as startOfToday } from "@/lib/date";
 import type {
   Department,
@@ -25,21 +29,21 @@ type StoreValue = WeeklyReportData & {
   /** Ngày hiện tại (0h) — dùng chung để tính trễ hạn / sắp đến hạn. */
   today: Date;
 
-  createMeeting: (input: MeetingInput) => Meeting;
+  createMeeting: (input: MeetingInput) => void;
   updateMeeting: (id: ID, input: MeetingInput) => void;
   deleteMeeting: (id: ID) => void;
 
-  createTask: (input: TaskInput) => Task;
+  createTask: (input: TaskInput) => void;
   updateTask: (id: ID, input: Partial<TaskInput>) => void;
   deleteTask: (id: ID) => void;
 
-  createDepartment: (input: DepartmentInput) => Department;
+  createDepartment: (input: DepartmentInput) => void;
   updateDepartment: (id: ID, input: DepartmentInput) => void;
-  deleteDepartment: (id: ID) => MutationResult;
+  deleteDepartment: (id: ID) => Promise<MutationResult>;
 
-  createPerson: (input: PersonInput) => Person;
+  createPerson: (input: PersonInput) => void;
   updatePerson: (id: ID, input: PersonInput) => void;
-  deletePerson: (id: ID) => MutationResult;
+  deletePerson: (id: ID) => Promise<MutationResult>;
 
   getDepartment: (id: ID) => Department | undefined;
   getDepartmentName: (id: ID) => string;
@@ -52,173 +56,347 @@ type StoreValue = WeeklyReportData & {
 
 const WeeklyReportContext = React.createContext<StoreValue | null>(null);
 
-let idCounter = 0;
-function nextId(prefix: string) {
-  idCounter += 1;
-  return `${prefix}-new-${idCounter}`;
+const EMPTY_DATA: WeeklyReportData = {
+  departments: [],
+  people: [],
+  meetings: [],
+  tasks: [],
+};
+
+let tempIdCounter = 0;
+/** ID tạm cho bản ghi mới trong lúc chờ máy chủ trả về ID thật. */
+function tempId(prefix: string) {
+  tempIdCounter += 1;
+  return `${prefix}-pending-${tempIdCounter}`;
 }
 
 /**
- * Nguồn dữ liệu duy nhất của ứng dụng.
- * Hiện đang chạy trên mock data trong bộ nhớ; khi có backend thật chỉ cần
- * thay phần khởi tạo và các hàm create/update/delete bằng lời gọi API.
+ * Nguồn dữ liệu duy nhất của ứng dụng — đọc/ghi qua các API route đứng trước
+ * Postgres (xem `src/lib/api-client.ts`). Mỗi thao tác cập nhật state cục bộ
+ * ngay lập tức để giao diện phản hồi tức thì (optimistic update); nếu máy chủ
+ * từ chối, store tự đồng bộ lại bằng cách tải lại toàn bộ dữ liệu và báo lỗi
+ * qua toast.
  */
 export function WeeklyReportProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [data, setData] = React.useState<WeeklyReportData>(() =>
-    getInitialData(),
-  );
+  const { toast } = useToast();
+  const [data, setData] = React.useState<WeeklyReportData>(EMPTY_DATA);
   const [today] = React.useState<Date>(() => startOfToday());
+  const [status, setStatus] = React.useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    setStatus((prev) => (prev === "ready" ? prev : "loading"));
+    try {
+      const fresh = await api.bootstrap();
+      setData(fresh);
+      setStatus("ready");
+      setLoadError(null);
+    } catch (error) {
+      setStatus("error");
+      setLoadError(apiErrorMessage(error));
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  /** Đồng bộ lại toàn bộ dữ liệu sau một thao tác thất bại, không đổi màn hình loading. */
+  const resync = React.useCallback(async () => {
+    try {
+      const fresh = await api.bootstrap();
+      setData(fresh);
+    } catch {
+      // Giữ nguyên state cục bộ nếu không tải lại được — toast lỗi ở nơi gọi
+      // đã cho người dùng biết thao tác chưa lưu thành công.
+    }
+  }, []);
 
   const value = React.useMemo<StoreValue>(() => {
     /* ------------------------------- Cuộc họp ------------------------------ */
 
     const createMeeting = (input: MeetingInput) => {
-      const meeting: Meeting = { ...input, id: nextId("mt") };
-      setData((prev) => ({ ...prev, meetings: [...prev.meetings, meeting] }));
-      return meeting;
+      const id = tempId("mt");
+      setData((prev) => ({
+        ...prev,
+        meetings: [...prev.meetings, { ...input, id }],
+      }));
+
+      api
+        .createMeeting(input)
+        .then((created) => {
+          setData((prev) => ({
+            ...prev,
+            meetings: prev.meetings.map((m) => (m.id === id ? created : m)),
+          }));
+        })
+        .catch((error) => {
+          toast({
+            title: "Không tạo được cuộc họp",
+            description: apiErrorMessage(error),
+            variant: "danger",
+          });
+          void resync();
+        });
     };
 
     const updateMeeting = (id: ID, input: MeetingInput) => {
       setData((prev) => ({
         ...prev,
-        meetings: prev.meetings.map((meeting) =>
-          meeting.id === id ? { ...meeting, ...input, id } : meeting,
+        meetings: prev.meetings.map((m) =>
+          m.id === id ? { ...m, ...input, id } : m,
         ),
       }));
+
+      api
+        .updateMeeting(id, input)
+        .then((updated) => {
+          setData((prev) => ({
+            ...prev,
+            meetings: prev.meetings.map((m) => (m.id === id ? updated : m)),
+          }));
+        })
+        .catch((error) => {
+          toast({
+            title: "Không lưu được cuộc họp",
+            description: apiErrorMessage(error),
+            variant: "danger",
+          });
+          void resync();
+        });
     };
 
     const deleteMeeting = (id: ID) => {
       setData((prev) => ({
         ...prev,
-        meetings: prev.meetings.filter((meeting) => meeting.id !== id),
-        // Công việc vẫn giữ lại, chỉ gỡ liên kết với cuộc họp đã xoá.
-        tasks: prev.tasks.map((task) =>
-          task.meetingId === id ? { ...task, meetingId: undefined } : task,
+        meetings: prev.meetings.filter((m) => m.id !== id),
+        // Công việc vẫn giữ lại, chỉ gỡ liên kết với cuộc họp đã xoá
+        // (khớp với onDelete: SetNull ở schema.prisma).
+        tasks: prev.tasks.map((t) =>
+          t.meetingId === id ? { ...t, meetingId: undefined } : t,
         ),
       }));
+
+      api.deleteMeeting(id).catch((error) => {
+        toast({
+          title: "Không xoá được cuộc họp",
+          description: apiErrorMessage(error),
+          variant: "danger",
+        });
+        void resync();
+      });
     };
 
     /* ------------------------------ Công việc ------------------------------ */
 
     const createTask = (input: TaskInput) => {
-      const task: Task = { ...input, id: nextId("tk") };
-      setData((prev) => ({ ...prev, tasks: [...prev.tasks, task] }));
-      return task;
+      const id = tempId("tk");
+      setData((prev) => ({ ...prev, tasks: [...prev.tasks, { ...input, id }] }));
+
+      api
+        .createTask(input)
+        .then((created) => {
+          setData((prev) => ({
+            ...prev,
+            tasks: prev.tasks.map((t) => (t.id === id ? created : t)),
+          }));
+        })
+        .catch((error) => {
+          toast({
+            title: "Không tạo được công việc",
+            description: apiErrorMessage(error),
+            variant: "danger",
+          });
+          void resync();
+        });
     };
 
     const updateTask = (id: ID, input: Partial<TaskInput>) => {
       setData((prev) => ({
         ...prev,
-        tasks: prev.tasks.map((task) =>
-          task.id === id ? { ...task, ...input, id } : task,
+        tasks: prev.tasks.map((t) =>
+          t.id === id ? { ...t, ...input, id } : t,
         ),
       }));
+
+      api
+        .updateTask(id, input)
+        .then((updated) => {
+          setData((prev) => ({
+            ...prev,
+            tasks: prev.tasks.map((t) => (t.id === id ? updated : t)),
+          }));
+        })
+        .catch((error) => {
+          toast({
+            title: "Không lưu được công việc",
+            description: apiErrorMessage(error),
+            variant: "danger",
+          });
+          void resync();
+        });
     };
 
     const deleteTask = (id: ID) => {
       setData((prev) => ({
         ...prev,
-        tasks: prev.tasks.filter((task) => task.id !== id),
+        tasks: prev.tasks.filter((t) => t.id !== id),
       }));
+
+      api.deleteTask(id).catch((error) => {
+        toast({
+          title: "Không xoá được công việc",
+          description: apiErrorMessage(error),
+          variant: "danger",
+        });
+        void resync();
+      });
     };
 
     /* ------------------------------- Bộ phận ------------------------------- */
 
     const createDepartment = (input: DepartmentInput) => {
-      const department: Department = { ...input, id: nextId("dept") };
+      const id = tempId("dept");
       setData((prev) => ({
         ...prev,
-        departments: [...prev.departments, department],
+        departments: [...prev.departments, { ...input, id }],
       }));
-      return department;
+
+      api
+        .createDepartment(input)
+        .then((created) => {
+          setData((prev) => ({
+            ...prev,
+            departments: prev.departments.map((d) =>
+              d.id === id ? created : d,
+            ),
+          }));
+        })
+        .catch((error) => {
+          toast({
+            title: "Không tạo được bộ phận",
+            description: apiErrorMessage(error),
+            variant: "danger",
+          });
+          void resync();
+        });
     };
 
     const updateDepartment = (id: ID, input: DepartmentInput) => {
       setData((prev) => ({
         ...prev,
-        departments: prev.departments.map((department) =>
-          department.id === id ? { ...department, ...input, id } : department,
+        departments: prev.departments.map((d) =>
+          d.id === id ? { ...d, ...input, id } : d,
         ),
       }));
+
+      api
+        .updateDepartment(id, input)
+        .then((updated) => {
+          setData((prev) => ({
+            ...prev,
+            departments: prev.departments.map((d) =>
+              d.id === id ? updated : d,
+            ),
+          }));
+        })
+        .catch((error) => {
+          toast({
+            title: "Không lưu được bộ phận",
+            description: apiErrorMessage(error),
+            variant: "danger",
+          });
+          void resync();
+        });
     };
 
-    const deleteDepartment = (id: ID): MutationResult => {
-      const peopleCount = data.people.filter(
-        (person) => person.departmentId === id,
-      ).length;
-      const meetingCount = data.meetings.filter(
-        (meeting) => meeting.departmentId === id,
-      ).length;
-      const taskCount = data.tasks.filter(
-        (task) => task.departmentId === id,
-      ).length;
-
-      if (peopleCount || meetingCount || taskCount) {
-        const parts = [
-          peopleCount ? `${peopleCount} nhân sự` : null,
-          meetingCount ? `${meetingCount} cuộc họp` : null,
-          taskCount ? `${taskCount} công việc` : null,
-        ].filter(Boolean);
-        return {
-          ok: false,
-          reason: `Bộ phận này còn ${parts.join(", ")}. Hãy chuyển hoặc xoá dữ liệu liên quan trước.`,
-        };
+    /**
+     * Khác với các hàm create/update ở trên, xoá bộ phận cần máy chủ xác nhận
+     * TRƯỚC khi cập nhật giao diện — vì máy chủ mới biết chắc bộ phận còn dữ
+     * liệu liên quan hay không (đã kiểm tra ở client trước đó cũng chỉ là một
+     * bản sao có thể lệch). Hàm trả `Promise<MutationResult>` để nơi gọi
+     * (trang Cài đặt) tự quyết định thông báo.
+     */
+    const deleteDepartment = async (id: ID): Promise<MutationResult> => {
+      try {
+        await api.deleteDepartment(id);
+        setData((prev) => ({
+          ...prev,
+          departments: prev.departments.filter((d) => d.id !== id),
+        }));
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, reason: apiErrorMessage(error) };
       }
-
-      setData((prev) => ({
-        ...prev,
-        departments: prev.departments.filter(
-          (department) => department.id !== id,
-        ),
-      }));
-      return { ok: true };
     };
 
     /* -------------------------------- Nhân sự ------------------------------- */
 
     const createPerson = (input: PersonInput) => {
-      const person: Person = { ...input, id: nextId("p") };
-      setData((prev) => ({ ...prev, people: [...prev.people, person] }));
-      return person;
+      const id = tempId("p");
+      setData((prev) => ({ ...prev, people: [...prev.people, { ...input, id }] }));
+
+      api
+        .createPerson(input)
+        .then((created) => {
+          setData((prev) => ({
+            ...prev,
+            people: prev.people.map((p) => (p.id === id ? created : p)),
+          }));
+        })
+        .catch((error) => {
+          toast({
+            title: "Không tạo được nhân sự",
+            description: apiErrorMessage(error),
+            variant: "danger",
+          });
+          void resync();
+        });
     };
 
     const updatePerson = (id: ID, input: PersonInput) => {
       setData((prev) => ({
         ...prev,
-        people: prev.people.map((person) =>
-          person.id === id ? { ...person, ...input, id } : person,
+        people: prev.people.map((p) =>
+          p.id === id ? { ...p, ...input, id } : p,
         ),
       }));
+
+      api
+        .updatePerson(id, input)
+        .then((updated) => {
+          setData((prev) => ({
+            ...prev,
+            people: prev.people.map((p) => (p.id === id ? updated : p)),
+          }));
+        })
+        .catch((error) => {
+          toast({
+            title: "Không lưu được nhân sự",
+            description: apiErrorMessage(error),
+            variant: "danger",
+          });
+          void resync();
+        });
     };
 
-    const deletePerson = (id: ID): MutationResult => {
-      const taskCount = data.tasks.filter(
-        (task) => task.assigneeId === id,
-      ).length;
-      const meetingCount = data.meetings.filter(
-        (meeting) => meeting.hostId === id,
-      ).length;
-
-      if (taskCount || meetingCount) {
-        const parts = [
-          taskCount ? `${taskCount} công việc đang phụ trách` : null,
-          meetingCount ? `${meetingCount} cuộc họp đang chủ trì` : null,
-        ].filter(Boolean);
-        return {
-          ok: false,
-          reason: `Người này còn ${parts.join(" và ")}. Hãy chuyển giao trước khi xoá.`,
-        };
+    const deletePerson = async (id: ID): Promise<MutationResult> => {
+      try {
+        await api.deletePerson(id);
+        setData((prev) => ({
+          ...prev,
+          people: prev.people.filter((p) => p.id !== id),
+        }));
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, reason: apiErrorMessage(error) };
       }
-
-      setData((prev) => ({
-        ...prev,
-        people: prev.people.filter((person) => person.id !== id),
-      }));
-      return { ok: true };
     };
 
     /* ------------------------------- Truy vấn ------------------------------ */
@@ -256,7 +434,16 @@ export function WeeklyReportProvider({
       getTasksByMeeting: (meetingId) =>
         data.tasks.filter((task) => task.meetingId === meetingId),
     };
-  }, [data, today]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, today, toast]);
+
+  if (status === "loading") {
+    return <FullPageLoading />;
+  }
+
+  if (status === "error") {
+    return <FullPageError message={loadError} onRetry={load} />;
+  }
 
   return (
     <WeeklyReportContext.Provider value={value}>
@@ -273,4 +460,52 @@ export function useWeeklyReport(): StoreValue {
     );
   }
   return context;
+}
+
+/** Hiện trong lúc tải dữ liệu ban đầu từ database — chỉ xảy ra một lần khi vào app. */
+function FullPageLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+      <div className="w-full max-w-sm space-y-4">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-10 w-10 shrink-0 rounded-2xl" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-32" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        </div>
+        <Skeleton className="h-24 w-full rounded-2xl" />
+        <Skeleton className="h-24 w-full rounded-2xl" />
+      </div>
+    </div>
+  );
+}
+
+/** Hiện khi không kết nối được database lúc tải trang — có nút thử lại. */
+function FullPageError({
+  message,
+  onRetry,
+}: {
+  message: string | null;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+      <div className="w-full max-w-sm space-y-4 rounded-2xl border border-border bg-card p-6 text-center shadow-card">
+        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-coral-100 text-coral-700">
+          <ServerCrash className="h-6 w-6" />
+        </span>
+        <div className="space-y-1.5">
+          <p className="font-semibold">Không tải được dữ liệu</p>
+          <p className="text-sm text-muted-foreground">
+            {message ?? "Có lỗi xảy ra khi kết nối tới máy chủ."}
+          </p>
+        </div>
+        <Button onClick={onRetry} className="w-full">
+          <RotateCw />
+          Thử lại
+        </Button>
+      </div>
+    </div>
+  );
 }

@@ -1,0 +1,90 @@
+// ---------------------------------------------------------------------------
+// Prisma schema — Weekly Report
+//
+// Provider đích là "postgresql" (dùng với Vercel Postgres / Neon khi deploy).
+// Ngày tháng và danh sách quyết định được lưu dưới dạng String (không dùng kiểu
+// riêng của Postgres như DateTime/Array) để schema chạy giống hệt trên mọi
+// engine SQL — đây cũng là cách team đã kiểm thử cục bộ bằng SQLite trước khi
+// nối vào Postgres thật, xem README mục "Cơ sở dữ liệu".
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Department {
+  id   String @id @default(cuid())
+  name String
+
+  people   Person[]
+  meetings Meeting[]
+  tasks    Task[]
+
+  @@map("departments")
+}
+
+model Person {
+  id             String @id @default(cuid())
+  name           String
+  avatarInitials String
+  /// "Trưởng bộ phận" | "Nhân viên" — kiểm tra ở tầng API, không dùng enum
+  /// của DB để schema tương thích cả SQLite lẫn Postgres.
+  role           String
+
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  hostedMeetings Meeting[] @relation("MeetingHost")
+  assignedTasks  Task[]    @relation("TaskAssignee")
+
+  @@map("people")
+}
+
+model Meeting {
+  id      String @id @default(cuid())
+  /// Ngày họp dạng "yyyy-MM-dd", khớp với ISODate ở phía app.
+  date    String
+  agenda  String
+  notes   String
+  /// Mảng quyết định, lưu dạng chuỗi JSON (xem src/lib/db-mappers.ts).
+  decisions String
+
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  hostId String
+  host   Person @relation("MeetingHost", fields: [hostId], references: [id], onDelete: Restrict)
+
+  tasks Task[]
+
+  @@map("meetings")
+}
+
+model Task {
+  id          String @id @default(cuid())
+  title       String
+  description String
+  /// Hạn chót dạng "yyyy-MM-dd".
+  dueDate     String
+  /// "Cao" | "Trung bình" | "Thấp"
+  priority    String
+  /// "Chưa bắt đầu" | "Đang làm" | "Hoàn thành" | "Trễ hạn"
+  status      String
+  progress    Int
+
+  meetingId String?
+  meeting   Meeting? @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+
+  assigneeId String
+  assignee   Person @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
+
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@map("tasks")
+}

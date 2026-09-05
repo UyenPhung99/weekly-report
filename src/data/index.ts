@@ -1,16 +1,12 @@
-import type { WeeklyReportData } from "@/types";
-
-import { departments } from "./departments";
-import { meetings } from "./meetings";
-import { people } from "./people";
-import { tasks } from "./tasks";
-
-export { departments, meetings, people, tasks };
-
 /**
- * Dữ liệu khởi tạo cho store.
- * Khi có backend thật, thay hàm này bằng lời gọi API (ví dụ `fetch("/api/bootstrap")`).
+ * Bộ dữ liệu mẫu — KHÔNG còn được app runtime dùng trực tiếp (store đã chuyển
+ * sang đọc/ghi qua `/api/*` xuống Postgres, xem `src/lib/store.tsx`).
+ *
+ * Nơi duy nhất còn dùng các mảng này là `prisma/seed.ts`, để database có sẵn
+ * dữ liệu khi mới deploy thay vì trống trơn. Giữ file này lại như một barrel
+ * export gọn cho seed script.
  */
-export function getInitialData(): WeeklyReportData {
-  return { departments, people, meetings, tasks };
-}
+export { departments } from "./departments";
+export { meetings } from "./meetings";
+export { people } from "./people";
+export { tasks } from "./tasks";
