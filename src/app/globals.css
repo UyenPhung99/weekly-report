@@ -1,0 +1,205 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ---------------------------------------------------------------------- */
+  /*  Design tokens (HSL) — chủ đề "Tím pastel" • chế độ sáng                */
+  /* ---------------------------------------------------------------------- */
+  :root {
+    /* Nền & chữ */
+    --background: 260 33% 98.2%; /* #FAF9FC */
+    --foreground: 257 24% 20%; /* #2E2740 */
+
+    /* Thẻ / card: nền tím rất nhạt #F3F0FA */
+    --card: 258 50% 96%;
+    --card-foreground: 257 24% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 257 24% 20%;
+
+    /* Tím pastel chủ đạo #B5A8D5 */
+    --primary: 257 35% 74.7%;
+    --primary-foreground: 254 29% 19%;
+
+    --secondary: 258 48% 91.8%; /* #E6E0F4 */
+    --secondary-foreground: 254 29% 19%;
+
+    --muted: 258 40% 94%;
+    --muted-foreground: 254 12% 46%;
+
+    /* Accent: hồng pastel nhạt */
+    --accent: 334 67% 95.3%; /* #FBEBF2 */
+    --accent-foreground: 336 38% 44%;
+
+    --destructive: 0 60% 70%;
+    --destructive-foreground: 0 40% 18%;
+
+    --border: 258 48% 91.8%;
+    --input: 258 48% 91.8%;
+    --ring: 257 35% 68%;
+
+    /* Trạng thái pastel cho badge / tag */
+    --success: 154 51% 92%; /* mint 100 */
+    --success-foreground: 158 47% 30%;
+    --warning: 35 79% 92.4%;
+    --warning-foreground: 32 66% 32%;
+    --info: 258 48% 91.8%;
+    --info-foreground: 257 25% 43%;
+    --danger: 5 79% 94.3%;
+    --danger-foreground: 3 47% 40%;
+
+    /* Biểu đồ — mỗi token gắn với một trạng thái công việc */
+    --chart-not-started: 259 46% 86%; /* lavender 300 */
+    --chart-in-progress: 257 35% 74.7%; /* lavender 500 */
+    --chart-done: 156 47% 73%; /* mint 300 */
+    --chart-overdue: 5 72% 79%; /* coral 300 */
+    --chart-accent: 335 60% 83%; /* blossom 300 */
+    --chart-grid: 258 48% 91.8%;
+
+    /* Sidebar */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 254 20% 30%;
+    --sidebar-muted: 254 12% 46%;
+    --sidebar-active: 258 50% 96%;
+    --sidebar-active-foreground: 254 29% 19%;
+    --sidebar-border: 258 48% 91.8%;
+
+    /* Bo góc mềm */
+    --radius: 1rem;
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /*  Chế độ tối (tuỳ chọn — thêm class "dark" vào <html>)                   */
+  /* ---------------------------------------------------------------------- */
+  .dark {
+    --background: 258 24% 10%;
+    --foreground: 258 30% 94%;
+
+    --card: 257 22% 14%;
+    --card-foreground: 258 30% 94%;
+
+    --popover: 257 22% 14%;
+    --popover-foreground: 258 30% 94%;
+
+    --primary: 257 35% 72%;
+    --primary-foreground: 254 29% 14%;
+
+    --secondary: 256 18% 22%;
+    --secondary-foreground: 258 30% 94%;
+
+    --muted: 256 18% 20%;
+    --muted-foreground: 256 14% 68%;
+
+    --accent: 336 22% 26%;
+    --accent-foreground: 334 60% 90%;
+
+    --destructive: 0 45% 48%;
+    --destructive-foreground: 0 40% 96%;
+
+    --border: 256 16% 24%;
+    --input: 256 16% 24%;
+    --ring: 257 35% 62%;
+
+    --success: 158 30% 24%;
+    --success-foreground: 154 51% 88%;
+    --warning: 32 34% 26%;
+    --warning-foreground: 35 79% 88%;
+    --info: 256 22% 28%;
+    --info-foreground: 258 48% 90%;
+    --danger: 3 32% 28%;
+    --danger-foreground: 5 79% 90%;
+
+    --chart-not-started: 256 20% 42%;
+    --chart-in-progress: 257 35% 68%;
+    --chart-done: 156 40% 55%;
+    --chart-overdue: 5 58% 66%;
+    --chart-accent: 335 45% 68%;
+    --chart-grid: 256 16% 26%;
+
+    --sidebar: 257 22% 13%;
+    --sidebar-foreground: 258 22% 86%;
+    --sidebar-muted: 256 14% 62%;
+    --sidebar-active: 256 20% 20%;
+    --sidebar-active-foreground: 258 40% 96%;
+    --sidebar-border: 256 16% 22%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    @apply bg-lavender-200 text-lavender-900;
+  }
+
+  /* Thanh cuộn mảnh, tông tím pastel */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--secondary)) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    @apply rounded-full border-4 border-solid border-transparent bg-secondary bg-clip-padding;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    @apply bg-lavender-300;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  In ấn — dùng cho "Xuất PDF" ở trang Báo cáo tuần                           */
+/*  Phần ẩn/hiện bố cục xử lý bằng biến thể `print:` của Tailwind ngay trong    */
+/*  component; ở đây chỉ đặt khổ giấy và ép trình duyệt giữ nguyên màu pastel.  */
+/* -------------------------------------------------------------------------- */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+@layer components {
+  /* Nền gradient rất nhẹ cho vùng nội dung chính */
+  .app-surface {
+    background-image: radial-gradient(
+        60rem 60rem at 100% -10%,
+        hsl(var(--accent) / 0.55),
+        transparent 60%
+      ),
+      radial-gradient(
+        50rem 50rem at -10% 0%,
+        hsl(var(--secondary) / 0.6),
+        transparent 55%
+      );
+  }
+}
