@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { formatDate, toISODate } from "@/lib/date";
 import { useWeeklyReport, type TaskInput } from "@/lib/store";
+import { clearDraft, readDraft, useFormDraft } from "@/lib/use-form-draft";
 import {
   TASK_PRIORITIES,
   type Task,
@@ -78,6 +79,14 @@ export function TaskFormDialog({
   const [open, setOpen] = React.useState(false);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
 
+  // Khoá nháp riêng cho từng ngữ cảnh: sửa một công việc cụ thể, tạo mới từ
+  // một cuộc họp, hay tạo mới chung — để nếu lỡ tải lại trang khi chưa bấm
+  // Lưu thì mở lại đúng chỗ đó vẫn còn nội dung. Xem src/lib/use-form-draft.ts.
+  const draftKey = task
+    ? `task:${task.id}`
+    : `task:new:${defaults?.meetingId ?? "general"}`;
+  const [restoredDraft, setRestoredDraft] = React.useState(false);
+
   const buildInitialState = React.useCallback((): FormState => {
     const source = task ?? defaults;
     const departmentId =
@@ -98,13 +107,36 @@ export function TaskFormDialog({
 
   const [form, setForm] = React.useState<FormState>(buildInitialState);
 
-  // Nạp lại dữ liệu mỗi lần mở hộp thoại.
+  // Nạp lại dữ liệu mỗi lần mở hộp thoại — ưu tiên bản nháp chưa lưu nếu có.
   React.useEffect(() => {
     if (open) {
-      setForm(buildInitialState());
+      const draft = readDraft<FormState>(draftKey);
+      if (draft) {
+        setForm(draft);
+        setRestoredDraft(true);
+      } else {
+        setForm(buildInitialState());
+        setRestoredDraft(false);
+      }
       setErrors({});
     }
-  }, [open, buildInitialState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, buildInitialState, draftKey]);
+
+  // Tự lưu nháp xuống localStorage trong lúc hộp thoại đang mở.
+  useFormDraft(open ? draftKey : null, form);
+
+  const discardDraft = () => {
+    clearDraft(draftKey);
+    setForm(buildInitialState());
+    setRestoredDraft(false);
+  };
+
+  /** Đóng hộp thoại và coi như không cần bản nháp nữa (Huỷ / Esc / bấm ra ngoài). */
+  const handleOpenChange = (next: boolean) => {
+    if (!next) clearDraft(draftKey);
+    setOpen(next);
+  };
 
   const peopleInDepartment = getPeopleByDepartment(form.departmentId);
   const meetingsInDepartment = meetings.filter(
@@ -175,11 +207,12 @@ export function TaskFormDialog({
         description: `${payload.title} · hạn ${formatDate(payload.dueDate)}`,
       });
     }
-    setOpen(false);
+    // Đã lưu thành công nên không cần giữ nháp nữa.
+    handleOpenChange(false);
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
@@ -192,6 +225,19 @@ export function TaskFormDialog({
               : "Điền thông tin công việc và giao cho người phụ trách."}
           </DialogDescription>
         </DialogHeader>
+
+        {restoredDraft ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-lavender-100 px-3 py-2 text-xs text-lavender-800">
+            <span>Đã khôi phục nội dung bạn nhập dở lần trước, chưa lưu.</span>
+            <button
+              type="button"
+              onClick={discardDraft}
+              className="font-medium underline underline-offset-2 hover:text-lavender-900"
+            >
+              Bỏ nháp, dùng bản gốc
+            </button>
+          </div>
+        ) : null}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -365,7 +411,7 @@ export function TaskFormDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => setOpen(false)}
+              onClick={() => handleOpenChange(false)}
             >
               Huỷ
             </Button>
